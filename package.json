@@ -1,0 +1,13 @@
+{
+  "name": "kubeli",
+  "version": "1.0.0",
+  "description": "Kubeli - Work Smarter. Protect Knowledge. Build Equity.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "better-sqlite3": "^11.7.0"
+  }
+}

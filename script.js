@@ -2,7 +2,7 @@
    Kubeli - JavaScript Functionality
    ======================================== */
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     initMobileMenu();
     initResourceFilter();
     initSmoothScroll();
@@ -17,19 +17,19 @@ document.addEventListener('DOMContentLoaded', function() {
 function initMobileMenu() {
     const toggle = document.getElementById('mobileMenuToggle');
     const nav = document.getElementById('mainNav');
-    
+
     if (!toggle || !nav) return;
-    
-    toggle.addEventListener('click', function() {
+
+    toggle.addEventListener('click', function () {
         toggle.classList.toggle('active');
         nav.classList.toggle('active');
         document.body.style.overflow = nav.classList.contains('active') ? 'hidden' : '';
     });
-    
+
     // Close menu when clicking a link
     const navLinks = nav.querySelectorAll('.nav-link');
     navLinks.forEach(link => {
-        link.addEventListener('click', function() {
+        link.addEventListener('click', function () {
             toggle.classList.remove('active');
             nav.classList.remove('active');
             document.body.style.overflow = '';
@@ -44,21 +44,21 @@ function initMobileMenu() {
 function initResourceFilter() {
     const filterBtns = document.querySelectorAll('.filter-btn');
     const resourceCards = document.querySelectorAll('.resource-card');
-    
+
     if (!filterBtns.length || !resourceCards.length) return;
-    
+
     filterBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function () {
             // Update active state
             filterBtns.forEach(b => b.classList.remove('active'));
             this.classList.add('active');
-            
+
             const filter = this.dataset.filter;
-            
+
             // Filter cards
             resourceCards.forEach(card => {
                 const category = card.dataset.category;
-                
+
                 if (filter === 'all' || category === filter) {
                     card.classList.remove('hidden');
                     card.style.animation = 'fadeInUp 0.4s ease forwards';
@@ -76,20 +76,20 @@ function initResourceFilter() {
 
 function initSmoothScroll() {
     const links = document.querySelectorAll('a[href^="#"]');
-    
+
     links.forEach(link => {
-        link.addEventListener('click', function(e) {
+        link.addEventListener('click', function (e) {
             const targetId = this.getAttribute('href');
-            
+
             if (targetId === '#') return;
-            
+
             const target = document.querySelector(targetId);
-            
+
             if (target) {
                 e.preventDefault();
                 const headerHeight = document.querySelector('.header').offsetHeight;
                 const targetPosition = target.offsetTop - headerHeight;
-                
+
                 window.scrollTo({
                     top: targetPosition,
                     behavior: 'smooth'
@@ -109,7 +109,7 @@ function initScrollAnimations() {
         rootMargin: '0px',
         threshold: 0.1
     };
-    
+
     const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
@@ -118,12 +118,12 @@ function initScrollAnimations() {
             }
         });
     }, observerOptions);
-    
+
     // Observe elements that should animate on scroll
     const animateElements = document.querySelectorAll(
         '.service-card, .resource-card, .stat, .impact-stat'
     );
-    
+
     animateElements.forEach((el, index) => {
         el.style.opacity = '0';
         el.style.animationDelay = `${index * 0.1}s`;
@@ -137,37 +137,53 @@ function initScrollAnimations() {
 
 function initFormSubmission() {
     const form = document.getElementById('earlyAccessForm');
-    
+
     if (!form) return;
-    
-    form.addEventListener('submit', function(e) {
+
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
-        
+
         const emailInput = form.querySelector('input[type="email"]');
         const email = emailInput.value.trim();
-        
+
         if (!email) {
             showNotification('Please enter your email address', 'error');
             return;
         }
-        
+
         if (!isValidEmail(email)) {
             showNotification('Please enter a valid email address', 'error');
             return;
         }
-        
-        // Simulate form submission
+
         const submitBtn = form.querySelector('button[type="submit"]');
         const originalText = submitBtn.textContent;
         submitBtn.textContent = 'Sending...';
         submitBtn.disabled = true;
-        
-        setTimeout(() => {
-            showNotification('Thank you! We\'ll be in touch soon.', 'success');
-            emailInput.value = '';
+
+        try {
+            const response = await fetch('/api/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                showNotification(data.message, 'success');
+                emailInput.value = '';
+            } else if (response.status === 409) {
+                showNotification(data.message, 'info');
+            } else {
+                showNotification(data.message || 'Something went wrong.', 'error');
+            }
+        } catch (err) {
+            showNotification('Network error. Please try again later.', 'error');
+        } finally {
             submitBtn.textContent = originalText;
             submitBtn.disabled = false;
-        }, 1000);
+        }
     });
 }
 
@@ -180,11 +196,11 @@ function showNotification(message, type = 'info') {
     // Remove existing notifications
     const existing = document.querySelector('.notification');
     if (existing) existing.remove();
-    
+
     const notification = document.createElement('div');
     notification.className = `notification notification-${type}`;
     notification.textContent = message;
-    
+
     // Style the notification
     Object.assign(notification.style, {
         position: 'fixed',
@@ -198,9 +214,9 @@ function showNotification(message, type = 'info') {
         animation: 'fadeInUp 0.3s ease',
         background: type === 'success' ? '#22c55e' : type === 'error' ? '#ef4444' : '#3b82f6'
     });
-    
+
     document.body.appendChild(notification);
-    
+
     // Remove after 4 seconds
     setTimeout(() => {
         notification.style.animation = 'fadeOut 0.3s ease forwards';
@@ -214,15 +230,15 @@ function showNotification(message, type = 'info') {
 
 let lastScroll = 0;
 
-window.addEventListener('scroll', function() {
+window.addEventListener('scroll', function () {
     const header = document.querySelector('.header');
     const currentScroll = window.pageYOffset;
-    
+
     if (currentScroll > 100) {
         header.style.background = 'rgba(26, 10, 16, 0.98)';
     } else {
         header.style.background = 'rgba(26, 10, 16, 0.9)';
     }
-    
+
     lastScroll = currentScroll;
 });
