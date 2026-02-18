@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kubeli - Admin Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .admin-container {
+            max-width: 800px;
+            margin: 100px auto;
+            padding: 2rem;
+            background: var(--color-bg-card);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--color-border);
+        }
+
+        .login-form {
+            max-width: 400px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .dashboard {
+            display: none;
+        }
+
+        .subscriber-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .subscriber-table th,
+        .subscriber-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--color-border);
+        }
+
+        .subscriber-table th {
+            color: var(--color-accent-primary);
+        }
+
+        .logout-btn {
+            float: right;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="admin-container">
+            <div id="loginSection">
+                <h2 class="section-title" style="text-align: center;">Admin Login</h2>
+                <form id="loginForm" class="login-form">
+                    <div class="form-group">
+                        <input type="text" id="username" class="form-input" placeholder="Username" required>
+                    </div>
+                    <div class="form-group">
+                        <input type="password" id="password" class="form-input" placeholder="Password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
+                    <p id="loginError" style="color: #ef4444; text-align: center; margin-top: 1rem; display: none;"></p>
+                </form>
+            </div>
+
+            <div id="dashboardSection" class="dashboard">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                    <h1 class="section-title" style="margin: 0;">Dashboard</h1>
+                    <button id="logoutBtn" class="btn btn-outline">Logout</button>
+                </div>
+
+                <div class="tabs"
+                    style="display: flex; gap: 1rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.5rem;">
+                    <button class="btn btn-outline active" data-tab="subscribers">Subscribers</button>
+                    <button class="btn btn-outline" data-tab="admins" id="adminsTabBtn" style="display: none;">Manage
+                        Admins</button>
+                </div>
+
+                <!-- Subscribers Tab -->
+                <div id="subscribersTab" class="tab-content">
+                    <h2 class="section-title">Subscribers List</h2>
+                    <div id="loadingSubscribers" style="text-align: center; color: var(--color-text-secondary);">
+                        Loading...</div>
+                    <table class="subscriber-table" id="subscribersTable" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Email</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="subscribersList"></tbody>
+                    </table>
+                </div>
+
+                <!-- Admins Tab (Super Admin Only) -->
+                <div id="adminsTab" class="tab-content" style="display: none;">
+                    <h2 class="section-title">Manage Admins</h2>
+
+                    <div
+                        style="margin-bottom: 2rem; padding: 1.5rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px;">
+                        <h3 style="margin-bottom: 1rem;">Create New Admin</h3>
+                        <form id="createAdminForm"
+                            style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 1rem; align-items: end;">
+                            <div class="form-group" style="margin: 0;">
+                                <label
+                                    style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem;">Username</label>
+                                <input type="text" id="newAdminUsername" class="form-input" required>
+                            </div>
+                            <div class="form-group" style="margin: 0;">
+                                <label
+                                    style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem;">Password</label>
+                                <input type="password" id="newAdminPassword" class="form-input" required>
+                            </div>
+                            <div class="form-group" style="margin: 0;">
+                                <label style="display: block; margin-bottom: 0.5rem; font-size: 0.875rem;">Role</label>
+                                <select id="newAdminRole" class="form-input"
+                                    style="width: 100%; padding: 0.75rem; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--color-border); color: var(--color-text-primary); border-radius: var(--radius-sm);">
+                                    <option value="admin">Admin</option>
+                                    <option value="super_admin">Super Admin</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Create</button>
+                        </form>
+                    </div>
+
+                    <div id="loadingAdmins"
+                        style="text-align: center; color: var(--color-text-secondary); display: none;">Loading...</div>
+                    <table class="subscriber-table" id="adminsTable" style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Username</th>
+                                <th>Role</th>
+                                <th>Created At</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminsList"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="admin.js"></script>
+</body>
+
+</html>
