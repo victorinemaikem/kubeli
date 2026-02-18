@@ -1,20 +1,40 @@
-/* ========================================
-   Kubeli - Express Server
-   Email collection for early access signups
-   ======================================== */
-
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
+const { body, validationResult } = require('express-validator');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const SECRET_KEY = 'super-secret-key-change-this'; // In production use Env Var
+const SECRET_KEY = process.env.SECRET_KEY || 'super-secret-key-change-this';
 
 // ── Middleware ──────────────────────────────
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
+
+// Rate Limiters
+const subscribeLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5, // limit each IP to 5 requests per windowMs
+    message: { success: false, message: 'Too many subscription attempts, please try again later.' }
+});
+
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10, // Increased for dev/testing
+    message: { success: false, message: 'Too many login attempts, please try again later.' }
+});
+
+// Validation Middleware
+const validateRequest = (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, message: errors.array()[0].msg });
+    }
+    next();
+};
 
 // Auth Middleware
 const authenticate = (req, res, next) => {
@@ -72,9 +92,9 @@ db.exec(`
 // Seed Super Admin if no admins exist
 const adminCount = db.prepare('SELECT count(*) as count FROM admins').get();
 if (adminCount.count === 0) {
-    const hash = bcrypt.hashSync('admin123', 10);
+    const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin123', 10);
     db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)').run('admin', hash, 'super_admin');
-    console.log('✨ Created default super_admin: admin / admin123');
+    console.log('✨ Created default super_admin: admin');
 }
 
 // Prepared statements for performance
@@ -91,77 +111,66 @@ const getAllSubscribers = db.prepare(
 // ── API Routes ─────────────────────────────
 
 // Subscribe an email
-app.post('/api/subscribe', (req, res) => {
-    const { email } = req.body;
+app.post('/api/subscribe',
+    subscribeLimiter,
+    [
+        body('email').isEmail().withMessage('Please enter a valid email address.')
+            .normalizeEmail()
+    ],
+    validateRequest,
+    (req, res) => {
+        const { email } = req.body;
 
-    // Validate presence
-    if (!email || typeof email !== 'string') {
-        return res.status(400).json({
-            success: false,
-            message: 'Please provide a valid email address.'
-        });
-    }
+        // Check for duplicate
+        const existing = findSubscriber.get(email);
+        if (existing) {
+            return res.status(409).json({
+                success: false,
+                message: "You're already on the list! We'll be in touch soon."
+            });
+        }
 
-    const trimmedEmail = email.trim().toLowerCase();
-
-    // Validate format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(trimmedEmail)) {
-        return res.status(400).json({
-            success: false,
-            message: 'Please enter a valid email address.'
-        });
-    }
-
-    // Check for duplicate
-    const existing = findSubscriber.get(trimmedEmail);
-    if (existing) {
-        return res.status(409).json({
-            success: false,
-            message: "You're already on the list! We'll be in touch soon."
-        });
-    }
-
-    // Insert
-    try {
-        insertSubscriber.run(trimmedEmail);
-        return res.status(201).json({
-            success: true,
-            message: "Thank you! You're on the early access list."
-        });
-    } catch (err) {
-        console.error('DB insert error:', err);
-        return res.status(500).json({
-            success: false,
-            message: 'Something went wrong. Please try again later.'
-        });
-    }
-});
+        // Insert
+        try {
+            insertSubscriber.run(email);
+            return res.status(201).json({
+                success: true,
+                message: "Thank you! You're on the early access list."
+            });
+        } catch (err) {
+            console.error('DB insert error:', err);
+            return res.status(500).json({
+                success: false,
+                message: 'Something went wrong. Please try again later.'
+            });
+        }
+    });
 
 // Login
-app.post('/api/login', (req, res) => {
-    const { username, password } = req.body; // Changed from password-only
+app.post('/api/login',
+    loginLimiter,
+    [
+        body('username').trim().notEmpty().withMessage('Username is required'),
+        body('password').notEmpty().withMessage('Password is required')
+    ],
+    validateRequest,
+    (req, res) => {
+        const { username, password } = req.body;
 
-    // Support legacy "password-only" login for backward compatibility during transition if needed, 
-    // but better to enforce username. For now, let's assume valid admin/password login.
-    if (!username || !password) {
-        return res.status(400).json({ success: false, message: 'Username and password required' });
-    }
+        const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
 
-    const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
-
-    if (admin && bcrypt.compareSync(password, admin.password_hash)) {
-        // Create simple token
-        const payload = {
-            user: { id: admin.id, username: admin.username, role: admin.role },
-            secret: SECRET_KEY
-        };
-        const token = Buffer.from(JSON.stringify(payload)).toString('base64');
-        res.json({ success: true, token, role: admin.role, username: admin.username });
-    } else {
-        res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
-});
+        if (admin && bcrypt.compareSync(password, admin.password_hash)) {
+            // Create simple token
+            const payload = {
+                user: { id: admin.id, username: admin.username, role: admin.role },
+                secret: SECRET_KEY
+            };
+            const token = Buffer.from(JSON.stringify(payload)).toString('base64');
+            res.json({ success: true, token, role: admin.role, username: admin.username });
+        } else {
+            res.status(401).json({ success: false, message: 'Invalid credentials' });
+        }
+    });
 
 // List all subscribers (protected, any admin)
 app.get('/api/subscribers', authenticate, (req, res) => {
@@ -194,27 +203,33 @@ app.get('/api/admins', authenticate, (req, res) => {
 });
 
 // Create Admin (Super Admin Only)
-app.post('/api/admins', authenticate, requireSuperAdmin, (req, res) => {
-    const { username, password, role } = req.body;
+app.post('/api/admins',
+    authenticate,
+    requireSuperAdmin,
+    [
+        body('username').trim().notEmpty().withMessage('Username is required')
+            .isLength({ min: 3 }).withMessage('Username must be at least 3 chars'),
+        body('password').notEmpty().withMessage('Password is required')
+            .isLength({ min: 6 }).withMessage('Password must be at least 6 chars')
+    ],
+    validateRequest,
+    (req, res) => {
+        const { username, password, role } = req.body;
 
-    if (!username || !password) {
-        return res.status(400).json({ success: false, message: 'Username and password required' });
-    }
+        // Default role to 'admin' if not provided or invalid
+        const newRole = (role === 'super_admin') ? 'super_admin' : 'admin';
 
-    // Default role to 'admin' if not provided or invalid
-    const newRole = (role === 'super_admin') ? 'super_admin' : 'admin';
-
-    try {
-        const hash = bcrypt.hashSync(password, 10);
-        const result = db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)').run(username, hash, newRole);
-        res.json({ success: true, message: 'Admin created', id: result.lastInsertRowid });
-    } catch (err) {
-        if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-            return res.status(409).json({ success: false, message: 'Username already exists' });
+        try {
+            const hash = bcrypt.hashSync(password, 10);
+            const result = db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)').run(username, hash, newRole);
+            res.json({ success: true, message: 'Admin created', id: result.lastInsertRowid });
+        } catch (err) {
+            if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+                return res.status(409).json({ success: false, message: 'Username already exists' });
+            }
+            res.status(500).json({ success: false, message: 'Error creating admin' });
         }
-        res.status(500).json({ success: false, message: 'Error creating admin' });
-    }
-});
+    });
 
 // Delete Admin (Super Admin Only)
 app.delete('/api/admins/:id', authenticate, requireSuperAdmin, (req, res) => {
