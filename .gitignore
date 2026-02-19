@@ -7,3 +7,5 @@ database.db
 .env
 login.json
 setup-database.js
+.vercel
+.env*.local
