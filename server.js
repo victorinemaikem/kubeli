@@ -3,8 +3,11 @@ const express = require('express');
 const path = require('path');
 const Database = require('better-sqlite3');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
+const https = require('https');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,15 +47,10 @@ const authenticate = (req, res, next) => {
     const token = authHeader.split(' ')[1];
     if (!token) return res.status(401).json({ success: false, message: 'Unauthorized' });
 
-    // Simple token verification (In real app use JWT)
     try {
-        const payload = JSON.parse(Buffer.from(token, 'base64').toString());
-        if (payload.secret === SECRET_KEY) {
-            req.user = payload.user;
-            next();
-        } else {
-            throw new Error('Invalid token');
-        }
+        const payload = jwt.verify(token, SECRET_KEY);
+        req.user = payload.user;
+        next();
     } catch (e) {
         res.status(401).json({ success: false, message: 'Invalid token' });
     }
@@ -92,7 +90,7 @@ db.exec(`
 // Seed Super Admin if no admins exist
 const adminCount = db.prepare('SELECT count(*) as count FROM admins').get();
 if (adminCount.count === 0) {
-    const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin123', 10);
+    const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'Kubeli@@@Admin2026!Secured-PassWD!@', 10);
     db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)').run('admin', hash, 'super_admin');
     console.log('✨ Created default super_admin: admin');
 }
@@ -160,12 +158,11 @@ app.post('/api/login',
         const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
 
         if (admin && bcrypt.compareSync(password, admin.password_hash)) {
-            // Create simple token
+            // Create JWT token
             const payload = {
-                user: { id: admin.id, username: admin.username, role: admin.role },
-                secret: SECRET_KEY
+                user: { id: admin.id, username: admin.username, role: admin.role }
             };
-            const token = Buffer.from(JSON.stringify(payload)).toString('base64');
+            const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '24h' });
             res.json({ success: true, token, role: admin.role, username: admin.username });
         } else {
             res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -284,6 +281,22 @@ app.put('/api/admins/:id', authenticate, (req, res) => {
 });
 
 // ── Start Server ───────────────────────────
-app.listen(PORT, () => {
-    console.log(`✨ Kubeli server running at http://localhost:${PORT}`);
-});
+const useHttps = process.env.NODE_ENV === 'production' || process.env.USE_HTTPS === 'true';
+
+if (useHttps && fs.existsSync('./server.key') && fs.existsSync('./server.cert')) {
+    const options = {
+        key: fs.readFileSync('./server.key'),
+        cert: fs.readFileSync('./server.cert')
+    };
+    https.createServer(options, app).listen(PORT, () => {
+        console.log(`✨ Kubeli server running at https://localhost:${PORT}`);
+    });
+} else {
+    app.listen(PORT, () => {
+        console.log(`✨ Kubeli server running at http://localhost:${PORT}`);
+        if (useHttps) {
+            console.log('⚠️  HTTPS certificates not found, running on HTTP');
+            console.log('📝 To enable HTTPS, generate server.key and server.cert');
+        }
+    });
+}
