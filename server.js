@@ -300,3 +300,6 @@ if (useHttps && fs.existsSync('./server.key') && fs.existsSync('./server.cert'))
         }
     });
 }
+
+// Export for Vercel serverless functions
+module.exports = app;
