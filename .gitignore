@@ -1,11 +1,6 @@
 node_modules/
-database.sqlite
-database.sqlite-shm
-database.sqlite-wal
-database.db
 .DS_Store
 .env
 login.json
-setup-database.js
 .vercel
 .env*.local
