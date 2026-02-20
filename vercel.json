@@ -1,7 +1,7 @@
 {
   "version": 2,
   "functions": {
-    "server.js": {
+    "api/server.js": {
       "memory": 1024,
       "maxDuration": 10
     }
@@ -9,7 +9,7 @@
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "/server.js"
+      "dest": "/api/server.js"
     },
     {
       "src": "/admin.html",
