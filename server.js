@@ -1,13 +1,11 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
-const Database = require('better-sqlite3');
+const { neon } = require('@neondatabase/serverless');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
-const https = require('https');
-const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,13 +18,13 @@ app.use(express.static(path.join(__dirname)));
 // Rate Limiters
 const subscribeLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: 5, // limit each IP to 5 requests per windowMs
+    max: 5,
     message: { success: false, message: 'Too many subscription attempts, please try again later.' }
 });
 
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 10, // Increased for dev/testing
+    max: 10,
     message: { success: false, message: 'Too many login attempts, please try again later.' }
 });
 
@@ -65,46 +63,42 @@ const requireSuperAdmin = (req, res, next) => {
 };
 
 // ── Database Setup ─────────────────────────
-const db = new Database(path.join(__dirname, 'database.sqlite'));
+const sql = neon(process.env.DATABASE_URL);
 
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL');
+// Create tables and seed super admin on startup
+async function setupDatabase() {
+    await sql`
+        CREATE TABLE IF NOT EXISTS subscribers (
+            id SERIAL PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `;
 
-// Create tables
-db.exec(`
-    CREATE TABLE IF NOT EXISTS subscribers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        subscribed_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+    await sql`
+        CREATE TABLE IF NOT EXISTS admins (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'admin',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `;
 
-    CREATE TABLE IF NOT EXISTS admins (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        role TEXT DEFAULT 'admin', -- 'super_admin' or 'admin'
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
-`);
+    // Seed Super Admin if no admins exist
+    const result = await sql`SELECT COUNT(*) as count FROM admins`;
+    const adminCount = parseInt(result[0].count);
 
-// Seed Super Admin if no admins exist
-const adminCount = db.prepare('SELECT count(*) as count FROM admins').get();
-if (adminCount.count === 0) {
-    const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'Kubeli@@@Admin2026!Secured-PassWD!@', 10);
-    db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)').run('admin', hash, 'super_admin');
-    console.log('✨ Created default super_admin: admin');
+    if (adminCount === 0) {
+        const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'Kubeli@@@Admin2026!Secured-PassWD!@', 10);
+        await sql`INSERT INTO admins (username, password_hash, role) VALUES ('admin', ${hash}, 'super_admin')`;
+        console.log('✨ Created default super_admin: admin');
+    }
+
+    console.log('✅ Database setup complete');
 }
 
-// Prepared statements for performance
-const insertSubscriber = db.prepare(
-    'INSERT INTO subscribers (email) VALUES (?)'
-);
-const findSubscriber = db.prepare(
-    'SELECT id FROM subscribers WHERE email = ?'
-);
-const getAllSubscribers = db.prepare(
-    'SELECT id, email, subscribed_at FROM subscribers ORDER BY subscribed_at DESC'
-);
+setupDatabase().catch(console.error);
 
 // ── API Routes ─────────────────────────────
 
@@ -116,21 +110,21 @@ app.post('/api/subscribe',
             .normalizeEmail()
     ],
     validateRequest,
-    (req, res) => {
+    async (req, res) => {
         const { email } = req.body;
 
-        // Check for duplicate
-        const existing = findSubscriber.get(email);
-        if (existing) {
-            return res.status(409).json({
-                success: false,
-                message: "You're already on the list! We'll be in touch soon."
-            });
-        }
-
-        // Insert
         try {
-            insertSubscriber.run(email);
+            // Check for duplicate
+            const existing = await sql`SELECT id FROM subscribers WHERE email = ${email}`;
+            if (existing.length > 0) {
+                return res.status(409).json({
+                    success: false,
+                    message: "You're already on the list! We'll be in touch soon."
+                });
+            }
+
+            // Insert
+            await sql`INSERT INTO subscribers (email) VALUES (${email})`;
             return res.status(201).json({
                 success: true,
                 message: "Thank you! You're on the early access list."
@@ -152,27 +146,32 @@ app.post('/api/login',
         body('password').notEmpty().withMessage('Password is required')
     ],
     validateRequest,
-    (req, res) => {
+    async (req, res) => {
         const { username, password } = req.body;
 
-        const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
+        try {
+            const result = await sql`SELECT * FROM admins WHERE username = ${username}`;
+            const admin = result[0];
 
-        if (admin && bcrypt.compareSync(password, admin.password_hash)) {
-            // Create JWT token
-            const payload = {
-                user: { id: admin.id, username: admin.username, role: admin.role }
-            };
-            const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '24h' });
-            res.json({ success: true, token, role: admin.role, username: admin.username });
-        } else {
-            res.status(401).json({ success: false, message: 'Invalid credentials' });
+            if (admin && bcrypt.compareSync(password, admin.password_hash)) {
+                const payload = {
+                    user: { id: admin.id, username: admin.username, role: admin.role }
+                };
+                const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '24h' });
+                res.json({ success: true, token, role: admin.role, username: admin.username });
+            } else {
+                res.status(401).json({ success: false, message: 'Invalid credentials' });
+            }
+        } catch (err) {
+            console.error('Login error:', err);
+            res.status(500).json({ success: false, message: 'Something went wrong.' });
         }
     });
 
 // List all subscribers (protected, any admin)
-app.get('/api/subscribers', authenticate, (req, res) => {
+app.get('/api/subscribers', authenticate, async (req, res) => {
     try {
-        const subscribers = db.prepare('SELECT id, email, subscribed_at FROM subscribers ORDER BY subscribed_at DESC').all();
+        const subscribers = await sql`SELECT id, email, subscribed_at FROM subscribers ORDER BY subscribed_at DESC`;
         return res.json({
             success: true,
             count: subscribers.length,
@@ -190,9 +189,9 @@ app.get('/api/subscribers', authenticate, (req, res) => {
 // ── Admin Management Routes ────────────────
 
 // List Admins
-app.get('/api/admins', authenticate, (req, res) => {
+app.get('/api/admins', authenticate, async (req, res) => {
     try {
-        const admins = db.prepare('SELECT id, username, role, created_at FROM admins').all();
+        const admins = await sql`SELECT id, username, role, created_at FROM admins`;
         res.json({ success: true, admins });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Error fetching admins' });
@@ -210,18 +209,20 @@ app.post('/api/admins',
             .isLength({ min: 6 }).withMessage('Password must be at least 6 chars')
     ],
     validateRequest,
-    (req, res) => {
+    async (req, res) => {
         const { username, password, role } = req.body;
-
-        // Default role to 'admin' if not provided or invalid
         const newRole = (role === 'super_admin') ? 'super_admin' : 'admin';
 
         try {
             const hash = bcrypt.hashSync(password, 10);
-            const result = db.prepare('INSERT INTO admins (username, password_hash, role) VALUES (?, ?, ?)').run(username, hash, newRole);
-            res.json({ success: true, message: 'Admin created', id: result.lastInsertRowid });
+            const result = await sql`
+                INSERT INTO admins (username, password_hash, role) 
+                VALUES (${username}, ${hash}, ${newRole})
+                RETURNING id
+            `;
+            res.json({ success: true, message: 'Admin created', id: result[0].id });
         } catch (err) {
-            if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+            if (err.code === '23505') { // PostgreSQL unique violation code
                 return res.status(409).json({ success: false, message: 'Username already exists' });
             }
             res.status(500).json({ success: false, message: 'Error creating admin' });
@@ -229,7 +230,7 @@ app.post('/api/admins',
     });
 
 // Delete Admin (Super Admin Only)
-app.delete('/api/admins/:id', authenticate, requireSuperAdmin, (req, res) => {
+app.delete('/api/admins/:id', authenticate, requireSuperAdmin, async (req, res) => {
     const id = req.params.id;
 
     // Prevent self-deletion
@@ -238,8 +239,8 @@ app.delete('/api/admins/:id', authenticate, requireSuperAdmin, (req, res) => {
     }
 
     try {
-        const result = db.prepare('DELETE FROM admins WHERE id = ?').run(id);
-        if (result.changes > 0) {
+        const result = await sql`DELETE FROM admins WHERE id = ${id} RETURNING id`;
+        if (result.length > 0) {
             res.json({ success: true, message: 'Admin deleted' });
         } else {
             res.status(404).json({ success: false, message: 'Admin not found' });
@@ -250,7 +251,7 @@ app.delete('/api/admins/:id', authenticate, requireSuperAdmin, (req, res) => {
 });
 
 // Update Admin (Self or Super Admin)
-app.put('/api/admins/:id', authenticate, (req, res) => {
+app.put('/api/admins/:id', authenticate, async (req, res) => {
     const id = parseInt(req.params.id);
     const { password, role } = req.body;
 
@@ -267,12 +268,10 @@ app.put('/api/admins/:id', authenticate, (req, res) => {
     try {
         if (password) {
             const hash = bcrypt.hashSync(password, 10);
-            db.prepare('UPDATE admins SET password_hash = ? WHERE id = ?').run(hash, id);
+            await sql`UPDATE admins SET password_hash = ${hash} WHERE id = ${id}`;
         }
         if (role) {
-            // Prevent removing the last super admin (basic check, can be improved)
-            // For now, allow it but client side should warn.
-            db.prepare('UPDATE admins SET role = ? WHERE id = ?').run(role, id);
+            await sql`UPDATE admins SET role = ${role} WHERE id = ${id}`;
         }
         res.json({ success: true, message: 'Admin updated' });
     } catch (err) {
@@ -281,25 +280,11 @@ app.put('/api/admins/:id', authenticate, (req, res) => {
 });
 
 // ── Start Server ───────────────────────────
-const useHttps = process.env.NODE_ENV === 'production' || process.env.USE_HTTPS === 'true';
-
-if (useHttps && fs.existsSync('./server.key') && fs.existsSync('./server.cert')) {
-    const options = {
-        key: fs.readFileSync('./server.key'),
-        cert: fs.readFileSync('./server.cert')
-    };
-    https.createServer(options, app).listen(PORT, () => {
-        console.log(`✨ Kubeli server running at https://localhost:${PORT}`);
-    });
-} else {
-    app.listen(PORT, () => {
-        console.log(`✨ Kubeli server running at http://localhost:${PORT}`);
-        if (useHttps) {
-            console.log('⚠️  HTTPS certificates not found, running on HTTP');
-            console.log('📝 To enable HTTPS, generate server.key and server.cert');
-        }
-    });
-}
+// NOTE: Vercel handles HTTPS automatically in production,
+// so we only run plain HTTP here. HTTPS is not needed on Vercel.
+app.listen(PORT, () => {
+    console.log(`✨ Kubeli server running at http://localhost:${PORT}`);
+});
 
 // Export for Vercel serverless functions
 module.exports = app;
