@@ -13,7 +13,7 @@ const SECRET_KEY = process.env.SECRET_KEY || 'super-secret-key-change-this';
 
 // ── Middleware ──────────────────────────────
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '..')));
+app.use(express.static(path.join(__dirname)));
 
 // Rate Limiters
 const subscribeLimiter = rateLimit({
