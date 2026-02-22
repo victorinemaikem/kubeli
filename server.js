@@ -302,3 +302,4 @@ app.listen(PORT, () => {
 
 // Export for Vercel serverless functions
 module.exports = app;
+
