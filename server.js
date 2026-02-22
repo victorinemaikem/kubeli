@@ -8,6 +8,8 @@ const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 
 const app = express();
+const helmet = require('helmet');
+app.use(helmet());
 const PORT = process.env.PORT || 3000;
 const SECRET_KEY = process.env.SECRET_KEY || 'super-secret-key-change-this';
 
@@ -99,10 +101,13 @@ async function setupDatabase() {
     const adminCount = parseInt(result[0].count);
 
     if (adminCount === 0) {
-        const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'Kubeli@@@Admin2026!Secured-PassWD!@', 10);
-        await sql`INSERT INTO admins (username, password_hash, role) VALUES ('admin', ${hash}, 'super_admin')`;
-        console.log('✨ Created default super_admin: admin');
+    if (!process.env.ADMIN_PASSWORD) {
+        throw new Error('ADMIN_PASSWORD environment variable is required to seed the super admin');
     }
+    const hash = bcrypt.hashSync(process.env.ADMIN_PASSWORD, 10);
+    await sql`INSERT INTO admins (username, password_hash, role) VALUES ('admin', ${hash}, 'super_admin')`;
+    console.log('✨ Created default super_admin: admin');
+}
 
     console.log('✅ Database setup complete');
 }
